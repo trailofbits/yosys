@@ -312,11 +312,18 @@ struct EdifBackend : public Backend {
 		*f << stringf("    (edifLevel 0)\n");
 		*f << stringf("    (technology (numberDefinition))\n");
 
+		auto add_bool_prop = [&](unsigned id) {
+      *f << "\n            (property "
+         << ID::attribute_name(static_cast<ID::BoolId>(id)) << " (integer 1))";
+		};
+
 		auto add_prop = [&](IdString name, Const val) {
 			if ((val.flags & RTLIL::CONST_FLAG_STRING) != 0)
-				*f << stringf("\n            (property %s (string \"%s\"))", EDIF_DEF(name), val.decode_string().c_str());
+			  *f << "\n            (property " << EDIF_DEF(name) << " (string \""
+			     << val.decode_string() << "\"))";
 			else if (val.bits.size() <= 32 && RTLIL::SigSpec(val).is_fully_def())
-				*f << stringf("\n            (property %s (integer %u))", EDIF_DEF(name), val.as_int());
+				*f << "\n            (property " << EDIF_DEF(name) << " (integer "
+				   << static_cast<unsigned>(val.as_int()) << "))";
 			else {
 				std::string hex_string = "";
 				for (size_t i = 0; i < val.bits.size(); i += 4) {
@@ -419,9 +426,16 @@ struct EdifBackend : public Backend {
 					dir = "OUTPUT";
 				if (wire->width == 1) {
 					*f << stringf("          (port %s (direction %s)", EDIF_DEF(wire->name), dir);
-					if (attr_properties)
+					if (attr_properties) {
 						for (auto &p : wire->attributes)
 							add_prop(p.first, p.second);
+
+						for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+              if (wire->bool_attributes.test(i)) {
+                add_bool_prop(i);
+              }
+            }
+					}
 					*f << ")\n";
 					RTLIL::SigSpec sig = sigmap(RTLIL::SigSpec(wire));
 					net_join_db[sig].insert(make_pair(stringf("(portRef %s)", EDIF_REF(wire->name)), wire->port_input));
@@ -430,9 +444,16 @@ struct EdifBackend : public Backend {
 					b[wire->upto ? 0 : 1] = wire->start_offset;
 					b[wire->upto ? 1 : 0] = wire->start_offset + GetSize(wire) - 1;
 					*f << stringf("          (port (array %s %d) (direction %s)", EDIF_DEFR(wire->name, port_rename, b[0], b[1]), wire->width, dir);
-					if (attr_properties)
+					if (attr_properties) {
 						for (auto &p : wire->attributes)
 							add_prop(p.first, p.second);
+
+            for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+              if (wire->bool_attributes.test(i)) {
+                add_bool_prop(i);
+              }
+            }
+					}
 
 					*f << ")\n";
 					for (int i = 0; i < wire->width; i++) {
@@ -456,9 +477,17 @@ struct EdifBackend : public Backend {
 						lib_cell_ports.count(cell->type) > 0 ? " (libraryRef LIB)" : "");
 				for (auto &p : cell->parameters)
 					add_prop(p.first, p.second);
-				if (attr_properties)
+
+				if (attr_properties) {
 					for (auto &p : cell->attributes)
 						add_prop(p.first, p.second);
+
+          for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+            if (cell->bool_attributes.test(i)) {
+              add_bool_prop(i);
+            }
+          }
+				}
 
 				*f << stringf(")\n");
 				for (auto &p : cell->connections()) {
@@ -526,9 +555,16 @@ struct EdifBackend : public Backend {
 						*f << stringf("            (portRef %c (instanceRef VCC))\n", gndvccy ? 'Y' : 'P');
 				}
 				*f << stringf("            )");
-				if (attr_properties && sig.wire != NULL)
+				if (attr_properties && sig.wire != NULL) {
 					for (auto &p : sig.wire->attributes)
 						add_prop(p.first, p.second);
+
+          for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+            if (sig.wire->bool_attributes.test(i)) {
+              add_bool_prop(i);
+            }
+          }
+				}
 				*f << stringf("\n          )\n");
 			}
 
@@ -560,9 +596,16 @@ struct EdifBackend : public Backend {
 								*f << stringf("              %s\n", ref.first.c_str());
 						*f << stringf("            )");
 
-						if (attr_properties && raw_sig.wire != NULL)
+						if (attr_properties && raw_sig.wire != NULL) {
 							for (auto &p : raw_sig.wire->attributes)
 								add_prop(p.first, p.second);
+
+	            for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+	              if (raw_sig.wire->bool_attributes.test(i)) {
+	                add_bool_prop(i);
+	              }
+	            }
+						}
 
 						*f << stringf("\n          )\n");
 					}

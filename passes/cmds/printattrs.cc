@@ -35,15 +35,22 @@ struct PrintAttrsPass : public Pass {
 		log("\n");
 	}
 
-	static std::string get_indent_str(const unsigned int indent) {
-		return stringf("%*s", indent, "");
+	static const char *get_indent_str(const unsigned int indent) {
+	  assert(6 >= indent);
+	  static const char *str = "      \0\0";
+	  return &(str[6 - indent]);
+	}
+
+	static void log_bool(unsigned id, unsigned indent) {
+    log("%s(* %s=1 *)\n", get_indent_str(indent),
+        ID::attribute_name(static_cast<ID::BoolId>(id)));
 	}
 
 	static void log_const(const RTLIL::IdString &s, const RTLIL::Const &x, const unsigned int indent) {
 		if (x.flags == RTLIL::CONST_FLAG_STRING)
-			log("%s(* %s=\"%s\" *)\n", get_indent_str(indent).c_str(), log_id(s), x.decode_string().c_str());
+			log("%s(* %s=\"%s\" *)\n", get_indent_str(indent), log_id(s), x.decode_string().c_str());
 		else if (x.flags == RTLIL::CONST_FLAG_NONE)
-			log("%s(* %s=%s *)\n", get_indent_str(indent).c_str(), log_id(s), x.as_string().c_str());
+			log("%s(* %s=%s *)\n", get_indent_str(indent), log_id(s), x.as_string().c_str());
 		else
 			log_assert(x.flags == RTLIL::CONST_FLAG_STRING || x.flags == RTLIL::CONST_FLAG_NONE); //intended to fail
 	}
@@ -57,25 +64,43 @@ struct PrintAttrsPass : public Pass {
 		for (auto mod : design->selected_modules())
 		{
 			if (design->selected_whole_module(mod)) {
-				log("%s%s\n", get_indent_str(indent).c_str(), log_id(mod->name));
+				log("%s%s\n", get_indent_str(indent), log_id(mod->name));
 				indent += 2;
+
 				for (auto &it : mod->attributes)
 					log_const(it.first, it.second, indent);
+
+				for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+          if (mod->bool_attributes.test(i)) {
+            log_bool(i, indent);
+          }
+        }
 			}
 
 			for (auto cell : mod->selected_cells()) {
-				log("%s%s\n", get_indent_str(indent).c_str(), log_id(cell->name));
+				log("%s%s\n", get_indent_str(indent), log_id(cell->name));
 				indent += 2;
 				for (auto &it : cell->attributes)
 					log_const(it.first, it.second, indent);
+
+				for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+          if (cell->bool_attributes.test(i)) {
+            log_bool(i, indent);
+          }
+        }
 				indent -= 2;
 			}
 
 			for (auto wire : mod->selected_wires()) {
-				log("%s%s\n", get_indent_str(indent).c_str(), log_id(wire->name));
+				log("%s%s\n", get_indent_str(indent), log_id(wire->name));
 				indent += 2;
 				for (auto &it : wire->attributes)
 					log_const(it.first, it.second, indent);
+				for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+          if (wire->bool_attributes.test(i)) {
+            log_bool(i, indent);
+          }
+        }
 				indent -= 2;
 			}
 

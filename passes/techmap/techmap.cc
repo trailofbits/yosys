@@ -218,7 +218,7 @@ struct TechmapWorker
 				w->port_input = false;
 				w->port_output = false;
 				w->port_id = 0;
-				w->attributes.erase(ID::techmap_autopurge);
+				w->set_bool_attribute(ID::techmap_autopurge, false);
 				if (tpl_w->get_bool_attribute(ID::_techmap_special_))
 					w->attributes.clear();
 				if (w->attributes.count(ID::src))
@@ -310,17 +310,29 @@ struct TechmapWorker
 				extra_connect = SigSig();
 			}
 
+			auto do_extra_donnect = [&] () {
+			  auto lhs = GetSize(extra_connect.first);
+        auto rhs = GetSize(extra_connect.second);
+        if (lhs > rhs)
+          extra_connect.first.remove(rhs, lhs-rhs);
+        else if (rhs > lhs)
+          extra_connect.second.remove(lhs, rhs-lhs);
+        module->connect(extra_connect);
+			};
+
+			bool found_extra_connect = false;
 			for (auto &attr : w->attributes) {
 				if (attr.first == ID::src)
 					continue;
-				auto lhs = GetSize(extra_connect.first);
-				auto rhs = GetSize(extra_connect.second);
-				if (lhs > rhs)
-					extra_connect.first.remove(rhs, lhs-rhs);
-				else if (rhs > lhs)
-					extra_connect.second.remove(lhs, rhs-lhs);
-				module->connect(extra_connect);
+				do_extra_donnect();
+				found_extra_connect = true;
 				break;
+			}
+
+			// If none of the non-bool attributes added the extra connection, then
+			// do so for the bool attributes.
+			if (!found_extra_connect && w->bool_attributes.count()) {
+			  do_extra_donnect();
 			}
 		}
 
@@ -384,10 +396,13 @@ struct TechmapWorker
 			if (c->attributes.count(ID::src))
 				c->add_strpool_attribute(ID::src, extra_src_attrs);
 
-			if (techmap_replace_cell)
+			if (techmap_replace_cell) {
 				for (auto attr : cell->attributes)
 					if (!c->attributes.count(attr.first))
 						c->attributes[attr.first] = attr.second;
+
+				c->bool_attributes |= cell->bool_attributes;
+			}
 		}
 
 		for (auto &it : tpl->connections()) {

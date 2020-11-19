@@ -216,7 +216,7 @@ struct RpcModule : RTLIL::Module {
 
 				module.second->name = mangled_name;
 				module.second->design = design;
-				module.second->attributes.erase(ID::top);
+				module.second->set_bool_attribute(ID::top, false);
 				if (!module.second->has_attribute(ID::hdlname))
 					module.second->set_string_attribute(ID::hdlname, module.first.str());
 				design->modules_[mangled_name] = module.second;

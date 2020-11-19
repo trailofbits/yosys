@@ -41,11 +41,132 @@ int RTLIL::IdString::last_created_idx_[8];
 int RTLIL::IdString::last_created_idx_ptr_;
 #endif
 
+int RTLIL::IdString::get_reference(const char *p)
+{
+  log_assert(destruct_guard.ok);
+
+  if (!p[0])
+    return 0;
+
+  auto it = global_id_index_.find((char*)p);
+  if (it != global_id_index_.end()) {
+#ifndef YOSYS_NO_IDS_REFCNT
+    global_refcount_storage_.at(it->second)++;
+#endif
+#ifdef YOSYS_XTRACE_GET_PUT
+    if (yosys_xtrace)
+      log("#X# GET-BY-NAME '%s' (index %d, refcount %d)\n", global_id_storage_.at(it->second), it->second, global_refcount_storage_.at(it->second));
+#endif
+    return it->second;
+  }
+
+  log_assert(p[0] == '$' || p[0] == '\\');
+  log_assert(p[1] != 0);
+  for (const char *c = p; *c; c++)
+    log_assert((unsigned)*c > (unsigned)' ');
+
+#ifndef YOSYS_NO_IDS_REFCNT
+  if (global_free_idx_list_.empty()) {
+    if (global_id_storage_.empty()) {
+      global_refcount_storage_.push_back(0);
+      global_id_storage_.push_back((char*)"");
+      global_id_index_[global_id_storage_.back()] = 0;
+    }
+    log_assert(global_id_storage_.size() < 0x40000000);
+    global_free_idx_list_.push_back(global_id_storage_.size());
+    global_id_storage_.push_back(nullptr);
+    global_refcount_storage_.push_back(0);
+  }
+
+  int idx = global_free_idx_list_.back();
+  global_free_idx_list_.pop_back();
+  global_id_storage_.at(idx) = strdup(p);
+  global_id_index_[global_id_storage_.at(idx)] = idx;
+  global_refcount_storage_.at(idx)++;
+#else
+  if (global_id_storage_.empty()) {
+    global_id_storage_.push_back((char*)"");
+    global_id_index_[global_id_storage_.back()] = 0;
+  }
+  int idx = global_id_storage_.size();
+  global_id_storage_.push_back(strdup(p));
+  global_id_index_[global_id_storage_.back()] = idx;
+#endif
+
+  if (yosys_xtrace) {
+    log("#X# New IdString '%s' with index %d.\n", p, idx);
+    log_backtrace("-X- ", yosys_xtrace-1);
+  }
+
+#ifdef YOSYS_XTRACE_GET_PUT
+  if (yosys_xtrace)
+    log("#X# GET-BY-NAME '%s' (index %d, refcount %d)\n", global_id_storage_.at(idx), idx, global_refcount_storage_.at(idx));
+#endif
+
+#ifdef YOSYS_USE_STICKY_IDS
+  // Avoid Create->Delete->Create pattern
+  if (last_created_idx_[last_created_idx_ptr_])
+    put_reference(last_created_idx_[last_created_idx_ptr_]);
+  last_created_idx_[last_created_idx_ptr_] = idx;
+  get_reference(last_created_idx_[last_created_idx_ptr_]);
+  last_created_idx_ptr_ = (last_created_idx_ptr_ + 1) & 7;
+#endif
+
+  return idx;
+}
+
+#ifndef YOSYS_NO_IDS_REFCNT
+void RTLIL::IdString::free_reference(int idx)
+{
+  if (yosys_xtrace) {
+    log("#X# Removed IdString '%s' with index %d.\n", global_id_storage_.at(idx), idx);
+    log_backtrace("-X- ", yosys_xtrace-1);
+  }
+
+  global_id_index_.erase(global_id_storage_.at(idx));
+  free(global_id_storage_.at(idx));
+  global_id_storage_.at(idx) = nullptr;
+  global_free_idx_list_.push_back(idx);
+}
+
+void RTLIL::IdString::put_reference(int idx)
+{
+  // put_reference() may be called from destructors after the destructor of
+  // global_refcount_storage_ has been run. in this case we simply do nothing.
+  if (!destruct_guard.ok || !idx)
+    return;
+
+#ifdef YOSYS_XTRACE_GET_PUT
+  if (yosys_xtrace) {
+    log("#X# PUT '%s' (index %d, refcount %d)\n", global_id_storage_.at(idx), idx, global_refcount_storage_.at(idx));
+  }
+#endif
+
+  int &refcount = global_refcount_storage_[idx];
+
+  if (--refcount > 0)
+    return;
+
+  log_assert(refcount == 0);
+  free_reference(idx);
+}
+#endif
+
 #define X(_id) IdString RTLIL::ID::_id;
+#define BOOL_X(_id)
 #include "kernel/constids.inc"
 #undef X
+#undef BOOL_X
 
 dict<std::string, std::string> RTLIL::constpad;
+
+static const IdString bool_strings[ID::kMaxNumBoolIds] = {
+#define X(_id)
+#define BOOL_X(_id) ID($ ## _id),
+#include "kernel/constids.inc"
+#undef X
+#undef BOOL_X
+};
 
 const pool<IdString> &RTLIL::builtin_ff_cell_types() {
 	static const pool<IdString> res = {
@@ -220,7 +341,7 @@ RTLIL::Const::Const(RTLIL::State bit, int width)
 RTLIL::Const::Const(const std::vector<bool> &bits)
 {
 	flags = RTLIL::CONST_FLAG_NONE;
-	for (const auto &b : bits)
+	for (auto b : bits)
 		this->bits.emplace_back(b ? State::S1 : State::S0);
 }
 
@@ -365,23 +486,19 @@ bool RTLIL::Const::is_fully_undef() const
 
 bool RTLIL::AttrObject::has_attribute(RTLIL::IdString id) const
 {
-	return attributes.count(id);
-}
+	if (attributes.count(id)) {
+	  return true;
+	}
 
-void RTLIL::AttrObject::set_bool_attribute(RTLIL::IdString id, bool value)
-{
-	if (value)
-		attributes[id] = RTLIL::Const(1);
-	else
-		attributes.erase(id);
-}
+	auto i = 0u;
+	for (auto bool_id : bool_strings) {
+	  if (bool_id == id) {
+	    return this->has_attribute(static_cast<ID::BoolId>(i));
+	  }
+	  ++i;
+	}
 
-bool RTLIL::AttrObject::get_bool_attribute(RTLIL::IdString id) const
-{
-	const auto it = attributes.find(id);
-	if (it == attributes.end())
-		return false;
-	return it->second.as_bool();
+	return false;
 }
 
 void RTLIL::AttrObject::set_string_attribute(RTLIL::IdString id, string value)
@@ -578,6 +695,58 @@ RTLIL::ObjRange<RTLIL::Module*> RTLIL::Design::modules()
 RTLIL::Module *RTLIL::Design::module(RTLIL::IdString name)
 {
 	return modules_.count(name) ? modules_.at(name) : NULL;
+}
+
+const char *ID::attribute_name(ID::BoolId id) {
+  switch (id) {
+#define X(_id)
+#define BOOL_X(_id) case ID::_id: return #_id;
+#include "kernel/constids.inc"
+#undef X
+#undef BOOL_X
+    case ID::kMaxNumBoolIds:
+      break;
+  }
+  return "";
+}
+
+IdString ID::attribute_string(ID::BoolId id) {
+  return bool_strings[id];
+}
+
+
+bool RTLIL::AttrObject::get_bool_attribute(RTLIL::IdString id) const {
+  auto i = 0u;
+  for (auto str : bool_strings) {
+    if (str == id) {
+      return this->get_bool_attribute(static_cast<ID::BoolId>(i));
+    }
+    ++i;
+  }
+
+  auto it = this->attributes.find(id);
+  if (it != this->attributes.end()) {
+    return it->second.as_bool();
+  } else {
+    return false;
+  }
+}
+
+void RTLIL::AttrObject::set_bool_attribute(RTLIL::IdString id, bool value) {
+  auto i = 0u;
+  for (auto str : bool_strings) {
+    if (str == id) {
+      this->set_bool_attribute(static_cast<ID::BoolId>(i), value);
+      return;
+    }
+    ++i;
+  }
+
+  if (value) {
+    this->attributes[id] = RTLIL::Const(1);
+  } else {
+    this->attributes.erase(id);
+  }
 }
 
 RTLIL::Module *RTLIL::Design::top_module()
@@ -1601,6 +1770,11 @@ void RTLIL::Module::check()
 {
 #ifndef NDEBUG
 	std::vector<bool> ports_declared;
+	for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+    auto attr = static_cast<ID::BoolId>(i);
+    auto attr_name = ID::attribute_string(attr);
+    log_assert(!attributes.count(attr_name));
+  }
 	for (auto &it : wires_) {
 		log_assert(this == it.second->module);
 		log_assert(it.first == it.second->name);
@@ -1609,6 +1783,11 @@ void RTLIL::Module::check()
 		log_assert(it.second->port_id >= 0);
 		for (auto &it2 : it.second->attributes)
 			log_assert(!it2.first.empty());
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+		  auto attr = static_cast<ID::BoolId>(i);
+		  auto attr_name = ID::attribute_string(attr);
+		  log_assert(!it.second->attributes.count(attr_name));
+		}
 		if (it.second->port_id) {
 			log_assert(GetSize(ports) >= it.second->port_id);
 			log_assert(ports.at(it.second->port_id-1) == it.first);
@@ -1631,6 +1810,11 @@ void RTLIL::Module::check()
 		log_assert(it.second->size >= 0);
 		for (auto &it2 : it.second->attributes)
 			log_assert(!it2.first.empty());
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+      auto attr = static_cast<ID::BoolId>(i);
+      auto attr_name = ID::attribute_string(attr);
+      log_assert(!it.second->attributes.count(attr_name));
+    }
 	}
 
 	for (auto &it : cells_) {
@@ -1644,6 +1828,11 @@ void RTLIL::Module::check()
 		}
 		for (auto &it2 : it.second->attributes)
 			log_assert(!it2.first.empty());
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+      auto attr = static_cast<ID::BoolId>(i);
+      auto attr_name = ID::attribute_string(attr);
+      log_assert(!it.second->attributes.count(attr_name));
+    }
 		for (auto &it2 : it.second->parameters)
 			log_assert(!it2.first.empty());
 		InternalCellChecker checker(this, it.second);
@@ -1665,6 +1854,11 @@ void RTLIL::Module::check()
 				}
 			}
 		}
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+      auto attr = static_cast<ID::BoolId>(i);
+      auto attr_name = ID::attribute_string(attr);
+      log_assert(!it.second->attributes.count(attr_name));
+    }
 		for (auto &sync_it : it.second->syncs) {
 			switch (sync_it->type) {
 				case SyncType::ST0:
@@ -3057,6 +3251,11 @@ void RTLIL::Cell::check()
 	InternalCellChecker checker(NULL, this);
 	checker.check();
 #endif
+	for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+    auto attr = static_cast<ID::BoolId>(i);
+    auto attr_name = ID::attribute_string(attr);
+    log_assert(!attributes.count(attr_name));
+  }
 }
 
 void RTLIL::Cell::fixup_parameters(bool set_a_signed, bool set_b_signed)

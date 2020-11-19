@@ -319,7 +319,7 @@ struct IopadmapPass : public Pass {
 								RTLIL::escape_id(tinoutpad_celltype));
 
 							cell->setPort(RTLIL::escape_id(tinoutpad_portname_oe), en_sig);
-							cell->attributes[ID::keep] = RTLIL::Const(1);
+							cell->set_bool_attribute(ID::keep);
 
 							if (tbuf_cell) {
 								module->remove(tbuf_cell);
@@ -342,7 +342,7 @@ struct IopadmapPass : public Pass {
 
 							cell->setPort(RTLIL::escape_id(toutpad_portname_oe), en_sig);
 							cell->setPort(RTLIL::escape_id(toutpad_portname_i), data_sig);
-							cell->attributes[ID::keep] = RTLIL::Const(1);
+							cell->set_bool_attribute(ID::keep);
 
 							if (tbuf_cell) {
 								module->remove(tbuf_cell);
@@ -427,7 +427,7 @@ struct IopadmapPass : public Pass {
 							cell->parameters[RTLIL::escape_id(widthparam)] = RTLIL::Const(1);
 						if (!nameparam.empty())
 							cell->parameters[RTLIL::escape_id(nameparam)] = RTLIL::Const(stringf("%s[%d]", RTLIL::id2cstr(wire->name), i));
-						cell->attributes[ID::keep] = RTLIL::Const(1);
+						cell->set_bool_attribute(ID::keep);
 					}
 				}
 				else
@@ -450,7 +450,7 @@ struct IopadmapPass : public Pass {
 						cell->parameters[RTLIL::escape_id(widthparam)] = RTLIL::Const(wire->width);
 					if (!nameparam.empty())
 						cell->parameters[RTLIL::escape_id(nameparam)] = RTLIL::Const(RTLIL::id2cstr(wire->name));
-					cell->attributes[ID::keep] = RTLIL::Const(1);
+					cell->set_bool_attribute(ID::keep);
 				}
 
 				if (!rewrite_bits.count(wire)) {

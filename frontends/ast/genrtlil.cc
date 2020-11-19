@@ -50,12 +50,14 @@ static RTLIL::SigSpec uniop2rtlil(AstNode *that, IdString type, int result_width
 	RTLIL::Wire *wire = current_module->addWire(cell->name.str() + "_Y", result_width);
 	wire->attributes[ID::src] = stringf("%s:%d.%d-%d.%d", that->filename.c_str(), that->location.first_line, that->location.first_column, that->location.last_line, that->location.last_column);
 
-	if (gen_attributes)
+	if (gen_attributes) {
 		for (auto &attr : that->attributes) {
 			if (attr.second->type != AST_CONSTANT)
 				log_file_error(that->filename, that->location.first_line, "Attribute `%s' with non-constant value!\n", attr.first.c_str());
 			cell->attributes[attr.first] = attr.second->asAttrConst();
 		}
+		cell->bool_attributes = that->bool_attributes;
+	}
 
 	cell->parameters[ID::A_SIGNED] = RTLIL::Const(that->children[0]->is_signed);
 	cell->parameters[ID::A_WIDTH] = RTLIL::Const(arg.size());
@@ -81,12 +83,14 @@ static void widthExtend(AstNode *that, RTLIL::SigSpec &sig, int width, bool is_s
 	RTLIL::Wire *wire = current_module->addWire(cell->name.str() + "_Y", width);
 	wire->attributes[ID::src] = stringf("%s:%d.%d-%d.%d", that->filename.c_str(), that->location.first_line, that->location.first_column, that->location.last_line, that->location.last_column);
 
-	if (that != NULL)
+	if (that != NULL) {
 		for (auto &attr : that->attributes) {
 			if (attr.second->type != AST_CONSTANT)
 				log_file_error(that->filename, that->location.first_line, "Attribute `%s' with non-constant value!\n", attr.first.c_str());
 			cell->attributes[attr.first] = attr.second->asAttrConst();
 		}
+		cell->bool_attributes = that->bool_attributes;
+	}
 
 	cell->parameters[ID::A_SIGNED] = RTLIL::Const(is_signed);
 	cell->parameters[ID::A_WIDTH] = RTLIL::Const(sig.size());
@@ -112,6 +116,7 @@ static RTLIL::SigSpec binop2rtlil(AstNode *that, IdString type, int result_width
 			log_file_error(that->filename, that->location.first_line, "Attribute `%s' with non-constant value!\n", attr.first.c_str());
 		cell->attributes[attr.first] = attr.second->asAttrConst();
 	}
+	cell->bool_attributes = that->bool_attributes;
 
 	cell->parameters[ID::A_SIGNED] = RTLIL::Const(that->children[0]->is_signed);
 	cell->parameters[ID::B_SIGNED] = RTLIL::Const(that->children[1]->is_signed);
@@ -146,6 +151,7 @@ static RTLIL::SigSpec mux2rtlil(AstNode *that, const RTLIL::SigSpec &cond, const
 			log_file_error(that->filename, that->location.first_line, "Attribute `%s' with non-constant value!\n", attr.first.c_str());
 		cell->attributes[attr.first] = attr.second->asAttrConst();
 	}
+	cell->bool_attributes = that->bool_attributes;
 
 	cell->parameters[ID::WIDTH] = RTLIL::Const(left.size());
 
@@ -171,7 +177,7 @@ struct AST_INTERNAL::LookaheadRewriter
 				for (auto c : node->id2ast->children)
 					wire->children.push_back(c->clone());
 				wire->str = stringf("$lookahead%s$%d", node->str.c_str(), autoidx++);
-				wire->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+				wire->set_bool_attribute(ID::nosync);
 				wire->is_logic = true;
 				while (wire->simplify(true, false, false, 1, -1, false, false)) { }
 				current_ast_mod->children.push_back(wire);
@@ -324,6 +330,7 @@ struct AST_INTERNAL::ProcessGenerator
 						attr.first.c_str());
 			proc->attributes[attr.first] = attr.second->asAttrConst();
 		}
+		proc->bool_attributes = always->bool_attributes;
 		current_module->processes[proc->name] = proc;
 		current_case = &proc->root_case;
 
@@ -596,6 +603,7 @@ struct AST_INTERNAL::ProcessGenerator
 						log_file_error(ast->filename, ast->location.first_line, "Attribute `%s' with non-constant value!\n", attr.first.c_str());
 					sw->attributes[attr.first] = attr.second->asAttrConst();
 				}
+				sw->bool_attributes = ast->bool_attributes;
 
 				RTLIL::SigSpec this_case_eq_lvalue;
 				collect_lvalues(this_case_eq_lvalue, ast, true, false);

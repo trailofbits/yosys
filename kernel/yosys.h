@@ -39,6 +39,7 @@
 #ifndef YOSYS_H
 #define YOSYS_H
 
+#include <bitset>
 #include <map>
 #include <set>
 #include <tuple>
@@ -46,6 +47,8 @@
 #include <string>
 #include <algorithm>
 #include <functional>
+#include <type_traits>
+#include <utility>
 #include <unordered_map>
 #include <unordered_set>
 #include <initializer_list>
@@ -53,6 +56,7 @@
 #include <memory>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 #include <sstream>
 #include <fstream>

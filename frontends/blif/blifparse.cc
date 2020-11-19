@@ -176,7 +176,7 @@ void parse_blif(RTLIL::Design *design, std::istream &f, IdString dff_name, bool 
 
 			if (!strcmp(cmd, ".blackbox"))
 			{
-				module->attributes[ID::blackbox] = RTLIL::Const(1);
+			  module->set_bool_attribute(ID::blackbox, true);
 				continue;
 			}
 

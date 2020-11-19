@@ -54,6 +54,7 @@ namespace RTLIL
 	};
 
 	struct Const;
+	struct AttrSupport;
 	struct AttrObject;
 	struct Selection;
 	struct Monitor;
@@ -143,114 +144,11 @@ namespace RTLIL
 			return idx;
 		}
 
-		static int get_reference(const char *p)
-		{
-			log_assert(destruct_guard.ok);
-
-			if (!p[0])
-				return 0;
-
-			auto it = global_id_index_.find((char*)p);
-			if (it != global_id_index_.end()) {
-		#ifndef YOSYS_NO_IDS_REFCNT
-				global_refcount_storage_.at(it->second)++;
-		#endif
-		#ifdef YOSYS_XTRACE_GET_PUT
-				if (yosys_xtrace)
-					log("#X# GET-BY-NAME '%s' (index %d, refcount %d)\n", global_id_storage_.at(it->second), it->second, global_refcount_storage_.at(it->second));
-		#endif
-				return it->second;
-			}
-
-			log_assert(p[0] == '$' || p[0] == '\\');
-			log_assert(p[1] != 0);
-			for (const char *c = p; *c; c++)
-				log_assert((unsigned)*c > (unsigned)' ');
-
-		#ifndef YOSYS_NO_IDS_REFCNT
-			if (global_free_idx_list_.empty()) {
-				if (global_id_storage_.empty()) {
-					global_refcount_storage_.push_back(0);
-					global_id_storage_.push_back((char*)"");
-					global_id_index_[global_id_storage_.back()] = 0;
-				}
-				log_assert(global_id_storage_.size() < 0x40000000);
-				global_free_idx_list_.push_back(global_id_storage_.size());
-				global_id_storage_.push_back(nullptr);
-				global_refcount_storage_.push_back(0);
-			}
-
-			int idx = global_free_idx_list_.back();
-			global_free_idx_list_.pop_back();
-			global_id_storage_.at(idx) = strdup(p);
-			global_id_index_[global_id_storage_.at(idx)] = idx;
-			global_refcount_storage_.at(idx)++;
-		#else
-			if (global_id_storage_.empty()) {
-				global_id_storage_.push_back((char*)"");
-				global_id_index_[global_id_storage_.back()] = 0;
-			}
-			int idx = global_id_storage_.size();
-			global_id_storage_.push_back(strdup(p));
-			global_id_index_[global_id_storage_.back()] = idx;
-		#endif
-
-			if (yosys_xtrace) {
-				log("#X# New IdString '%s' with index %d.\n", p, idx);
-				log_backtrace("-X- ", yosys_xtrace-1);
-			}
-
-		#ifdef YOSYS_XTRACE_GET_PUT
-			if (yosys_xtrace)
-				log("#X# GET-BY-NAME '%s' (index %d, refcount %d)\n", global_id_storage_.at(idx), idx, global_refcount_storage_.at(idx));
-		#endif
-
-		#ifdef YOSYS_USE_STICKY_IDS
-			// Avoid Create->Delete->Create pattern
-			if (last_created_idx_[last_created_idx_ptr_])
-				put_reference(last_created_idx_[last_created_idx_ptr_]);
-			last_created_idx_[last_created_idx_ptr_] = idx;
-			get_reference(last_created_idx_[last_created_idx_ptr_]);
-			last_created_idx_ptr_ = (last_created_idx_ptr_ + 1) & 7;
-		#endif
-
-			return idx;
-		}
+		static int get_reference(const char *p);
 
 	#ifndef YOSYS_NO_IDS_REFCNT
-		static inline void put_reference(int idx)
-		{
-			// put_reference() may be called from destructors after the destructor of
-			// global_refcount_storage_ has been run. in this case we simply do nothing.
-			if (!destruct_guard.ok || !idx)
-				return;
-
-		#ifdef YOSYS_XTRACE_GET_PUT
-			if (yosys_xtrace) {
-				log("#X# PUT '%s' (index %d, refcount %d)\n", global_id_storage_.at(idx), idx, global_refcount_storage_.at(idx));
-			}
-		#endif
-
-			int &refcount = global_refcount_storage_[idx];
-
-			if (--refcount > 0)
-				return;
-
-			log_assert(refcount == 0);
-			free_reference(idx);
-		}
-		static inline void free_reference(int idx)
-		{
-			if (yosys_xtrace) {
-				log("#X# Removed IdString '%s' with index %d.\n", global_id_storage_.at(idx), idx);
-				log_backtrace("-X- ", yosys_xtrace-1);
-			}
-
-			global_id_index_.erase(global_id_storage_.at(idx));
-			free(global_id_storage_.at(idx));
-			global_id_storage_.at(idx) = nullptr;
-			global_free_idx_list_.push_back(idx);
-		}
+		static void put_reference(int idx);
+		static void free_reference(int idx);
 	#else
 		static inline void put_reference(int) { }
 	#endif
@@ -282,21 +180,20 @@ namespace RTLIL
 		}
 
 		inline const char *c_str() const {
-			return global_id_storage_.at(index_);
+			return global_id_storage_[index_];
 		}
 
 		inline std::string str() const {
-			return std::string(global_id_storage_.at(index_));
+			return std::string(global_id_storage_[index_]);
 		}
 
 		inline bool operator<(const IdString &rhs) const {
 			return index_ < rhs.index_;
 		}
 
-		inline bool operator==(const IdString &rhs) const { return index_ == rhs.index_; }
-		inline bool operator!=(const IdString &rhs) const { return index_ != rhs.index_; }
-
-		// The methods below are just convenience functions for better compatibility with std::string.
+		// The methods below are just convenience functions for better compatibility
+		// with std::string. They come before comparisons with `IdString`s so that
+		// `IdString`s are not implicitly created to do the compares.
 
 		bool operator==(const std::string &rhs) const { return c_str() == rhs; }
 		bool operator!=(const std::string &rhs) const { return c_str() != rhs; }
@@ -304,11 +201,19 @@ namespace RTLIL
 		bool operator==(const char *rhs) const { return strcmp(c_str(), rhs) == 0; }
 		bool operator!=(const char *rhs) const { return strcmp(c_str(), rhs) != 0; }
 
+    inline bool operator==(const IdString &rhs) const { return index_ == rhs.index_; }
+    inline bool operator!=(const IdString &rhs) const { return index_ != rhs.index_; }
+
+
 		char operator[](size_t i) const {
 			const char *p = c_str();
+#ifndef NDEBUG
 			for (; i != 0; i--, p++)
 				log_assert(*p != 0);
 			return *p;
+#else
+			return p[i];
+#endif
 		}
 
 		std::string substr(size_t pos = 0, size_t len = std::string::npos) const {
@@ -343,7 +248,7 @@ namespace RTLIL
 		}
 
 		void clear() {
-			*this = IdString();
+			index_ = 0;
 		}
 
 		unsigned int hash() const {
@@ -381,8 +286,22 @@ namespace RTLIL
 
 	namespace ID {
 #define X(_id) extern IdString _id;
+#define BOOL_X(_id)
 #include "kernel/constids.inc"
 #undef X
+#undef BOOL_X
+
+	  enum BoolId : unsigned {
+#define X(_id)
+#define BOOL_X(_id) _id,
+#include "kernel/constids.inc"
+#undef X
+#undef BOOL_X
+	    kMaxNumBoolIds
+	  };
+
+	  const char *attribute_name(BoolId id);
+	  IdString attribute_string(BoolId id);
 	};
 
 	extern dict<std::string, std::string> constpad;
@@ -683,12 +602,24 @@ struct RTLIL::Const
 
 struct RTLIL::AttrObject
 {
+  std::bitset<ID::kMaxNumBoolIds> bool_attributes;
 	dict<RTLIL::IdString, RTLIL::Const> attributes;
 
 	bool has_attribute(RTLIL::IdString id) const;
+  inline bool has_attribute(ID::BoolId id) const {
+    return get_bool_attribute(id);
+  }
 
-	void set_bool_attribute(RTLIL::IdString id, bool value=true);
+	inline void set_bool_attribute(ID::BoolId id, bool value=true) {
+	  bool_attributes.set(static_cast<unsigned>(id), value);
+	}
+
+	inline bool get_bool_attribute(ID::BoolId id) const {
+	  return bool_attributes.test(static_cast<unsigned>(id));
+	}
+
 	bool get_bool_attribute(RTLIL::IdString id) const;
+	void set_bool_attribute(RTLIL::IdString, bool value=true);
 
 	bool get_blackbox_attribute(bool ignore_wb=false) const {
 		return get_bool_attribute(ID::blackbox) || (!ignore_wb && get_bool_attribute(ID::whitebox));

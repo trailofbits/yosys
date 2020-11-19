@@ -186,9 +186,17 @@ namespace AST
 		// the list of child nodes for this node
 		std::vector<AstNode*> children;
 
-		// the list of attributes assigned to this node
-		std::map<RTLIL::IdString, AstNode*> attributes;
-		bool get_bool_attribute(RTLIL::IdString id);
+    // the list of attributes assigned to this node
+    std::map<RTLIL::IdString, AstNode*> attributes;
+    std::bitset<RTLIL::ID::kMaxNumBoolIds> bool_attributes;
+
+		inline bool get_bool_attribute(RTLIL::ID::BoolId id) {
+		  return bool_attributes.test(static_cast<unsigned>(id));
+		}
+
+		inline void set_bool_attribute(RTLIL::ID::BoolId id, bool value=true) {
+		  bool_attributes.set(static_cast<unsigned>(id), value);
+		}
 
 		// node content - most of it is unused in most node types
 		std::string str;

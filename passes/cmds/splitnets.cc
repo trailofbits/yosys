@@ -69,9 +69,9 @@ struct SplitnetsWorker
 		if (it != wire->attributes.end())
 			new_wire->attributes.emplace(ID::hdlname, it->second);
 
-		it = wire->attributes.find(ID::keep);
-		if (it != wire->attributes.end())
-			new_wire->attributes.emplace(ID::keep, it->second);
+		if (wire->get_bool_attribute(ID::keep)) {
+		  new_wire->set_bool_attribute(ID::keep, true);
+		}
 
 		it = wire->attributes.find(ID::init);
 		if (it != wire->attributes.end()) {

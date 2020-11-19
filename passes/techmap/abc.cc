@@ -196,7 +196,7 @@ void extract_cell(RTLIL::Cell *cell, bool keepff)
 		if (keepff)
 			for (auto &c : sig_q.chunks())
 				if (c.wire != nullptr)
-					c.wire->attributes[ID::keep] = 1;
+					c.wire->set_bool_attribute(ID::keep);
 
 		assign_map.apply(sig_d);
 		assign_map.apply(sig_q);

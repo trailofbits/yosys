@@ -120,7 +120,7 @@ void generate(RTLIL::Design *design, const std::vector<std::string> &celltypes, 
 
 		RTLIL::Module *mod = new RTLIL::Module;
 		mod->name = celltype;
-		mod->attributes[ID::blackbox] = RTLIL::Const(1);
+		mod->set_bool_attribute(ID::blackbox);
 		design->add(mod);
 
 		for (auto &decl : ports) {
@@ -390,12 +390,12 @@ bool expand_module(RTLIL::Design *design, RTLIL::Module *module, bool flag_check
 				did_something = true;
 			}
 		// We clear 'module_not_derived' such that we will not rederive the cell again (needed when there are interfaces connected to the cell)
-		cell->attributes.erase(ID::module_not_derived);
+		cell->set_bool_attribute(ID::module_not_derived, false);
 	}
 	// Clear the attribute 'cells_not_processed' such that it can be known that we
 	// have been through all cells at least once, and that we can know whether
 	// to flag an error because of interface instances not found:
-	module->attributes.erase(ID::cells_not_processed);
+  module->set_bool_attribute(ID::cells_not_processed, false);
 
 
 	// If any interface instances or interface ports were found in the module, we need to rederive it completely:
@@ -860,10 +860,7 @@ struct HierarchyPass : public Pass {
 
 		if (top_mod != NULL) {
 			for (auto mod : design->modules())
-				if (mod == top_mod)
-					mod->attributes[ID::initial_top] = RTLIL::Const(1);
-				else
-					mod->attributes.erase(ID::initial_top);
+			  mod->set_bool_attribute(ID::initial_top, mod == top_mod);
 		}
 
 		bool did_something = true;
@@ -915,11 +912,8 @@ struct HierarchyPass : public Pass {
 
 		if (top_mod != NULL) {
 			for (auto mod : design->modules()) {
-				if (mod == top_mod)
-					mod->attributes[ID::top] = RTLIL::Const(1);
-				else
-					mod->attributes.erase(ID::top);
-				mod->attributes.erase(ID::initial_top);
+				mod->set_bool_attribute(ID::top, mod == top_mod);
+        mod->set_bool_attribute(ID::initial_top, false);
 			}
 		}
 
@@ -1055,7 +1049,7 @@ struct HierarchyPass : public Pass {
 								RTLIL::id2cstr(wire->name), RTLIL::id2cstr(module->name), RTLIL::id2cstr(cell->name), RTLIL::id2cstr(cell->type));
 					cell->setPort(wire->name, parent_wire);
 				}
-				cell->attributes.erase(ID::wildcard_port_conns);
+				cell->set_bool_attribute(ID::wildcard_port_conns, false);
 			}
 		}
 

@@ -273,7 +273,7 @@ struct DesignPass : public Pass {
 				RTLIL::Module *t = mod->clone();
 				t->name = prefix;
 				t->design = copy_to_design;
-				t->attributes.erase(ID::top);
+				t->set_bool_attribute(ID::top, false);
 				copy_to_design->add(t);
 
 				queue.insert(t);
@@ -305,7 +305,7 @@ struct DesignPass : public Pass {
 						RTLIL::Module *t = fmod->clone();
 						t->name = trg_name;
 						t->design = copy_to_design;
-						t->attributes.erase(ID::top);
+						t->set_bool_attribute(ID::top, false);
 						copy_to_design->add(t);
 
 						queue.insert(t);

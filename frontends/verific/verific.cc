@@ -1534,7 +1534,7 @@ void VerificImporter::import_netlist(RTLIL::Design *design, Netlist *nl, std::se
 		RTLIL::Cell *cell = module->addCell(inst_name, inst_type);
 
 		if (inst->IsPrimitive() && mode_keep)
-			cell->attributes[ID::keep] = 1;
+		  cell->set_bool_attribute(ID::keep, true);
 
 		dict<IdString, vector<SigBit>> cell_port_conns;
 

@@ -99,7 +99,7 @@ struct FlattenWorker
 			if (tpl_wire->name[0] == '\\') {
 				RTLIL::Wire *hier_wire = module->wire(concat_name(cell, tpl_wire->name));
 				if (hier_wire != nullptr && hier_wire->get_bool_attribute(ID::hierconn)) {
-					hier_wire->attributes.erase(ID::hierconn);
+				  hier_wire->set_bool_attribute(ID::hierconn, false);
 					if (GetSize(hier_wire) < GetSize(tpl_wire)) {
 						log_warning("Widening signal %s.%s to match size of %s.%s (via %s.%s).\n",
 							log_id(module), log_id(hier_wire), log_id(tpl), log_id(tpl_wire), log_id(module), log_id(cell));

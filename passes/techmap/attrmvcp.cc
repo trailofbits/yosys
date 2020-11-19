@@ -61,6 +61,7 @@ struct AttrmvcpPass : public Pass {
 		bool driven_mode = false;
 		bool purge_mode = false;
 		pool<IdString> attrnames;
+		std::bitset<ID::kMaxNumBoolIds> boolattrs;
 
 		size_t argidx;
 		for (argidx = 1; argidx < args.size(); argidx++)
@@ -79,7 +80,19 @@ struct AttrmvcpPass : public Pass {
 				continue;
 			}
 			if (arg == "-attr" && argidx+1 < args.size()) {
-				attrnames.insert(RTLIL::escape_id(args[++argidx]));
+			  const auto &next_arg = args[++argidx];
+			  bool found = false;
+			  for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+			    const auto attrname = ID::attribute_name(static_cast<ID::BoolId>(i));
+			    if (next_arg == attrname) {
+			      boolattrs.set(i);
+			      found = true;
+			      break;
+			    }
+			  }
+			  if (!found) {
+			    attrnames.insert(RTLIL::escape_id(args[++argidx]));
+			  }
 				continue;
 			}
 			break;
@@ -108,7 +121,9 @@ struct AttrmvcpPass : public Pass {
 			for (auto wire : module->selected_wires())
 			{
 				dict<IdString, Const> new_attributes;
+		    std::bitset<ID::kMaxNumBoolIds> new_bool_attributes;
 
+		    // Do the non-bool attributes.
 				for (auto attr : wire->attributes)
 				{
 					bool did_something = false;
@@ -131,8 +146,37 @@ struct AttrmvcpPass : public Pass {
 						new_attributes[attr.first] = attr.second;
 				}
 
+				// Now do the bool attributes.
+				for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i)
+				{
+				  bool did_something = false;
+
+				  const auto attr = static_cast<ID::BoolId>(i);
+				  if (!wire->get_bool_attribute(attr)) {
+				    continue;
+				  }
+
+				  if (!boolattrs.test(i)) {
+				    new_bool_attributes.set(i, true);
+				    continue;
+				  }
+
+          const auto attr_first = ID::attribute_string(attr);
+				  for (auto bit : sigmap(wire))
+            if (net2cells.count(bit))
+              for (auto cell : net2cells.at(bit)) {
+                log("Moving attribute %s=1 from %s.%s to %s.%s.\n", log_id(attr_first),
+                    log_id(module), log_id(wire), log_id(module), log_id(cell));
+                cell->set_bool_attribute(attr);
+                did_something = true;
+              }
+
+          if (!purge_mode && !did_something)
+            new_bool_attributes.set(i, true);
+				}
+
 				if (!copy_mode)
-					wire->attributes.swap(new_attributes);
+				  wire->bool_attributes = new_bool_attributes;
 			}
 		}
 	}

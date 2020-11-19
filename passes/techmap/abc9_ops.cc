@@ -928,11 +928,8 @@ void prep_box(RTLIL::Design *design)
 
 	dict<IdString,std::vector<IdString>> box_ports;
 	for (auto module : design->modules()) {
-		auto it = module->attributes.find(ID::abc9_box);
-		if (it == module->attributes.end())
-			continue;
-		bool box = it->second.as_bool();
-		module->attributes.erase(it);
+		bool box = module->get_bool_attribute(ID::abc9_box);
+		module->set_bool_attribute(ID::abc9_box, false);
 		if (!box)
 			continue;
 
@@ -1416,7 +1413,7 @@ void reintegrate(RTLIL::Module *module, bool dff_mode)
 		RTLIL::Wire *mapped_wire = mapped_mod->wire(port);
 		RTLIL::Wire *wire = module->wire(port);
 		log_assert(wire);
-		wire->attributes.erase(ID::abc9_keep);
+		wire->set_bool_attribute(ID::abc9_keep, false);
 
 		RTLIL::Wire *remap_wire = module->wire(remap_name(port));
 		RTLIL::SigSpec signal(wire, remap_wire->start_offset-wire->start_offset, GetSize(remap_wire));

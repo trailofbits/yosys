@@ -659,8 +659,12 @@ bool AstNode::simplify(bool const_fold, bool at_zero, bool in_lvalue, int stage,
 					reg->is_reg = true;
 					reg->is_signed = node->is_signed;
 					for (auto &it : node->attributes)
-						if (it.first != ID::mem2reg)
-							reg->attributes.emplace(it.first, it.second->clone());
+						reg->attributes.emplace(it.first, it.second->clone());
+					for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+					  if (i != ID::mem2reg && node->bool_attributes.test(i)) {
+					    reg->bool_attributes.set(i, true);
+					  }
+					}
 					reg->filename = node->filename;
 					reg->location = node->location;
 					children.push_back(reg);
@@ -756,9 +760,7 @@ bool AstNode::simplify(bool const_fold, bool at_zero, bool in_lvalue, int stage,
 				if (node->children.size() == 1 && node->children[0]->type == AST_RANGE) {
 					for (auto c : node->children[0]->children) {
 						if (!c->is_simple_const_expr()) {
-							if (attributes.count(ID::dynports))
-								delete attributes.at(ID::dynports);
-							attributes[ID::dynports] = AstNode::mkconst_int(1, true);
+							set_bool_attribute(ID::dynports);
 						}
 					}
 				}
@@ -809,6 +811,7 @@ bool AstNode::simplify(bool const_fold, bool at_zero, bool in_lvalue, int stage,
 							delete first_node->attributes[it.first];
 						first_node->attributes[it.first] = it.second->clone();
 					}
+					first_node->bool_attributes = node->bool_attributes;
 					children.erase(children.begin()+(i--));
 					did_something = true;
 					delete node;
@@ -1692,7 +1695,7 @@ bool AstNode::simplify(bool const_fold, bool at_zero, bool in_lvalue, int stage,
 		AstNode *wire = new AstNode(AST_WIRE, new AstNode(AST_RANGE, mkconst_int(data_range_left, true), mkconst_int(data_range_right, true)));
 		wire->str = wire_id;
 		if (current_block)
-			wire->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+		  wire->set_bool_attribute(ID::nosync);
 		current_ast_mod->children.push_back(wire);
 		while (wire->simplify(true, false, false, 1, -1, false, false)) { }
 
@@ -2247,14 +2250,14 @@ bool AstNode::simplify(bool const_fold, bool at_zero, bool in_lvalue, int stage,
 
 			AstNode *wire_mask = new AstNode(AST_WIRE, new AstNode(AST_RANGE, mkconst_int(source_width-1, true), mkconst_int(0, true)));
 			wire_mask->str = stringf("$bitselwrite$mask$%s:%d$%d", filename.c_str(), location.first_line, autoidx++);
-			wire_mask->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+			wire_mask->set_bool_attribute(ID::nosync);
 			wire_mask->is_logic = true;
 			while (wire_mask->simplify(true, false, false, 1, -1, false, false)) { }
 			current_ast_mod->children.push_back(wire_mask);
 
 			AstNode *wire_data = new AstNode(AST_WIRE, new AstNode(AST_RANGE, mkconst_int(source_width-1, true), mkconst_int(0, true)));
 			wire_data->str = stringf("$bitselwrite$data$%s:%d$%d", filename.c_str(), location.first_line, autoidx++);
-			wire_data->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+			wire_data->set_bool_attribute(ID::nosync);
 			wire_data->is_logic = true;
 			while (wire_data->simplify(true, false, false, 1, -1, false, false)) { }
 			current_ast_mod->children.push_back(wire_data);
@@ -2436,7 +2439,7 @@ skip_dynamic_range_lvalue_expansion:;
 			wire_tmp->str = stringf("$splitcmplxassign$%s:%d$%d", filename.c_str(), location.first_line, autoidx++);
 			current_ast_mod->children.push_back(wire_tmp);
 			current_scope[wire_tmp->str] = wire_tmp;
-			wire_tmp->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+			wire_tmp->set_bool_attribute(ID::nosync);
 			while (wire_tmp->simplify(true, false, false, 1, -1, false, false)) { }
 			wire_tmp->is_logic = true;
 
@@ -3313,7 +3316,7 @@ skip_dynamic_range_lvalue_expansion:;
 					wire->is_input = false;
 					wire->is_output = false;
 					wire->is_reg = true;
-					wire->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+					wire->set_bool_attribute(ID::nosync);
 					if (child->type == AST_ENUM_ITEM)
 						wire->attributes[ID::enum_base_type] = child->attributes[ID::enum_base_type];
 
@@ -3335,7 +3338,7 @@ skip_dynamic_range_lvalue_expansion:;
 					// convert purely constant arguments into localparams
 					if (child->is_input && child->type == AST_WIRE && arg->type == AST_CONSTANT && node_contains_assignment_to(decl, child)) {
 						wire->type = AST_LOCALPARAM;
-						wire->attributes.erase(ID::nosync);
+						wire->set_bool_attribute(ID::nosync, false);
 						wire->children.insert(wire->children.begin(), arg->clone());
 						continue;
 					}
@@ -4223,7 +4226,7 @@ bool AstNode::mem2reg_as_needed_pass2(pool<AstNode*> &mem2reg_set, AstNode *mod,
 		wire_addr->str = id_addr;
 		wire_addr->is_reg = true;
 		wire_addr->was_checked = true;
-		wire_addr->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+		wire_addr->set_bool_attribute(ID::nosync);
 		mod->children.push_back(wire_addr);
 		while (wire_addr->simplify(true, false, false, 1, -1, false, false)) { }
 
@@ -4232,7 +4235,7 @@ bool AstNode::mem2reg_as_needed_pass2(pool<AstNode*> &mem2reg_set, AstNode *mod,
 		wire_data->is_reg = true;
 		wire_data->was_checked = true;
 		wire_data->is_signed = mem_signed;
-		wire_data->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+		wire_data->set_bool_attribute(ID::nosync);
 		mod->children.push_back(wire_data);
 		while (wire_data->simplify(true, false, false, 1, -1, false, false)) { }
 
@@ -4303,7 +4306,7 @@ bool AstNode::mem2reg_as_needed_pass2(pool<AstNode*> &mem2reg_set, AstNode *mod,
 			wire_addr->is_reg = true;
 			wire_addr->was_checked = true;
 			if (block)
-				wire_addr->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+			  wire_addr->set_bool_attribute(ID::nosync);
 			mod->children.push_back(wire_addr);
 			while (wire_addr->simplify(true, false, false, 1, -1, false, false)) { }
 
@@ -4313,7 +4316,7 @@ bool AstNode::mem2reg_as_needed_pass2(pool<AstNode*> &mem2reg_set, AstNode *mod,
 			wire_data->was_checked = true;
 			wire_data->is_signed = mem_signed;
 			if (block)
-				wire_data->attributes[ID::nosync] = AstNode::mkconst_int(1, false);
+			  wire_data->set_bool_attribute(ID::nosync);
 			mod->children.push_back(wire_data);
 			while (wire_data->simplify(true, false, false, 1, -1, false, false)) { }
 

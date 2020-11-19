@@ -181,19 +181,6 @@ std::string AST::type2str(AstNodeType type)
 	}
 }
 
-// check if attribute exists and has non-zero value
-bool AstNode::get_bool_attribute(RTLIL::IdString id)
-{
-	if (attributes.count(id) == 0)
-		return false;
-
-	AstNode *attr = attributes.at(id);
-	if (attr->type != AST_CONSTANT)
-		log_file_error(attr->filename, attr->location.first_line, "Attribute `%s' with non-constant value!\n", id.c_str());
-
-	return attr->integer != 0;
-}
-
 // create new node (AstNode constructor)
 // (the optional child arguments make it easier to create AST trees)
 AstNode::AstNode(AstNodeType type, AstNode *child1, AstNode *child2, AstNode *child3)
@@ -240,6 +227,7 @@ AstNode *AstNode::clone() const
 {
 	AstNode *that = new AstNode;
 	*that = *this;
+  // NOTE: `bool_attributes` copied by value.
 	for (auto &it : that->children)
 		it = it->clone();
 	for (auto &it : that->attributes)
@@ -1029,9 +1017,8 @@ static AstModule* process_module(AstNode *ast, bool defer, AstNode *original_ast
 			log("--- END OF AST DUMP ---\n");
 		}
 
-		if (flag_nowb && ast->attributes.count(ID::whitebox)) {
-			delete ast->attributes.at(ID::whitebox);
-			ast->attributes.erase(ID::whitebox);
+		if (flag_nowb && ast->get_bool_attribute(ID::whitebox)) {
+		  ast->set_bool_attribute(ID::whitebox, false);
 		}
 
 		if (ast->attributes.count(ID::lib_whitebox)) {
@@ -1039,28 +1026,22 @@ static AstModule* process_module(AstNode *ast, bool defer, AstNode *original_ast
 				delete ast->attributes.at(ID::lib_whitebox);
 				ast->attributes.erase(ID::lib_whitebox);
 			} else {
-				if (ast->attributes.count(ID::whitebox)) {
-					delete ast->attributes.at(ID::whitebox);
-					ast->attributes.erase(ID::whitebox);
+				if (ast->get_bool_attribute(ID::whitebox)) {
+				  ast->set_bool_attribute(ID::whitebox, false);
 				}
 				AstNode *n = ast->attributes.at(ID::lib_whitebox);
-				ast->attributes[ID::whitebox] = n;
+				ast->set_bool_attribute(ID::whitebox, n->asBool());
 				ast->attributes.erase(ID::lib_whitebox);
+				delete n;
 			}
 		}
 
-		if (!blackbox_module && ast->attributes.count(ID::blackbox)) {
-			AstNode *n = ast->attributes.at(ID::blackbox);
-			if (n->type != AST_CONSTANT)
-				log_file_error(ast->filename, ast->location.first_line, "Got blackbox attribute with non-constant value!\n");
-			blackbox_module = n->asBool();
+		if (!blackbox_module && ast->get_bool_attribute(ID::blackbox)) {
+			blackbox_module = true;
 		}
 
-		if (blackbox_module && ast->attributes.count(ID::whitebox)) {
-			AstNode *n = ast->attributes.at(ID::whitebox);
-			if (n->type != AST_CONSTANT)
-				log_file_error(ast->filename, ast->location.first_line, "Got whitebox attribute with non-constant value!\n");
-			blackbox_module = !n->asBool();
+		if (blackbox_module && ast->get_bool_attribute(ID::whitebox)) {
+			blackbox_module = false;
 		}
 
 		if (ast->attributes.count(ID::noblackbox)) {
@@ -1076,9 +1057,8 @@ static AstModule* process_module(AstNode *ast, bool defer, AstNode *original_ast
 
 		if (blackbox_module)
 		{
-			if (ast->attributes.count(ID::whitebox)) {
-				delete ast->attributes.at(ID::whitebox);
-				ast->attributes.erase(ID::whitebox);
+			if (ast->get_bool_attribute(ID::whitebox)) {
+				ast->set_bool_attribute(ID::whitebox, false);
 			}
 
 			if (ast->attributes.count(ID::lib_whitebox)) {
@@ -1102,8 +1082,8 @@ static AstModule* process_module(AstNode *ast, bool defer, AstNode *original_ast
 
 			ast->children.swap(new_children);
 
-			if (ast->attributes.count(ID::blackbox) == 0) {
-				ast->attributes[ID::blackbox] = AstNode::mkconst_int(1, false);
+			if (!ast->get_bool_attribute(ID::blackbox)) {
+			  ast->set_bool_attribute(ID::blackbox);
 			}
 		}
 
@@ -1114,6 +1094,11 @@ static AstModule* process_module(AstNode *ast, bool defer, AstNode *original_ast
 				log_file_error(ast->filename, ast->location.first_line, "Attribute `%s' with non-constant value!\n", attr.first.c_str());
 			current_module->attributes[attr.first] = attr.second->asAttrConst();
 		}
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+      if (ast->bool_attributes.test(i)) {
+        current_module->set_bool_attribute(static_cast<ID::BoolId>(i));
+      }
+    }
 		for (size_t i = 0; i < ast->children.size(); i++) {
 			AstNode *node = ast->children[i];
 			if (node->type == AST_WIRE || node->type == AST_MEMORY)
@@ -1142,6 +1127,11 @@ static AstModule* process_module(AstNode *ast, bool defer, AstNode *original_ast
 				continue;
 			current_module->attributes[attr.first] = attr.second->asAttrConst();
 		}
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+      if (ast->bool_attributes.test(i)) {
+        current_module->set_bool_attribute(static_cast<ID::BoolId>(i));
+      }
+    }
 	}
 
 	if (ast->type == AST_INTERFACE)
@@ -1414,10 +1404,8 @@ void AstModule::reprocess_module(RTLIL::Design *design, const dict<RTLIL::IdStri
 
 	// Check if the module was the top module. If it was, we need to remove the top attribute and put it on the
 	// new module.
-	if (this->get_bool_attribute(ID::initial_top)) {
-		this->attributes.erase(ID::initial_top);
-		is_top = true;
-	}
+	is_top = get_bool_attribute(ID::initial_top);
+	set_bool_attribute(ID::initial_top, false);
 
 	// Generate RTLIL from AST for the new module and add to the design:
 	AstModule *newmod = process_module(new_ast, false, ast_before_replacing_interface_ports);
@@ -1521,7 +1509,7 @@ RTLIL::IdString AstModule::derive(RTLIL::Design *design, const dict<RTLIL::IdStr
 // create a new parametric module (when needed) and return the name of the generated module - without support for interfaces
 RTLIL::IdString AstModule::derive(RTLIL::Design *design, const dict<RTLIL::IdString, RTLIL::Const> &parameters, bool /*mayfail*/)
 {
-	bool quiet = lib || attributes.count(ID::blackbox) || attributes.count(ID::whitebox);
+	bool quiet = lib || get_bool_attribute(ID::blackbox) || get_bool_attribute(ID::whitebox);
 
 	AstNode *new_ast = NULL;
 	std::string modname = derive_common(design, parameters, &new_ast, quiet);

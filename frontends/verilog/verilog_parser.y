@@ -1663,31 +1663,19 @@ wire_name_list:
 	wire_name_and_opt_assign | wire_name_list ',' wire_name_and_opt_assign;
 
 wire_name_and_opt_assign:
-	wire_name {
-		bool attr_anyconst = false;
-		bool attr_anyseq = false;
-		bool attr_allconst = false;
-		bool attr_allseq = false;
-		if (ast_stack.back()->children.back()->get_bool_attribute(ID::anyconst)) {
-			delete ast_stack.back()->children.back()->attributes.at(ID::anyconst);
-			ast_stack.back()->children.back()->attributes.erase(ID::anyconst);
-			attr_anyconst = true;
-		}
-		if (ast_stack.back()->children.back()->get_bool_attribute(ID::anyseq)) {
-			delete ast_stack.back()->children.back()->attributes.at(ID::anyseq);
-			ast_stack.back()->children.back()->attributes.erase(ID::anyseq);
-			attr_anyseq = true;
-		}
-		if (ast_stack.back()->children.back()->get_bool_attribute(ID::allconst)) {
-			delete ast_stack.back()->children.back()->attributes.at(ID::allconst);
-			ast_stack.back()->children.back()->attributes.erase(ID::allconst);
-			attr_allconst = true;
-		}
-		if (ast_stack.back()->children.back()->get_bool_attribute(ID::allseq)) {
-			delete ast_stack.back()->children.back()->attributes.at(ID::allseq);
-			ast_stack.back()->children.back()->attributes.erase(ID::allseq);
-			attr_allseq = true;
-		}
+	wire_name {		
+    bool attr_anyconst = ast_stack.back()->children.back()->get_bool_attribute(ID::anyconst);
+		ast_stack.back()->children.back()->set_bool_attribute(ID::anyconst, false);
+		
+    bool attr_anyseq = ast_stack.back()->children.back()->get_bool_attribute(ID::anyseq);
+    ast_stack.back()->children.back()->set_bool_attribute(ID::anyseq, false);
+    
+    bool attr_allconst = ast_stack.back()->children.back()->get_bool_attribute(ID::allconst);
+    ast_stack.back()->children.back()->set_bool_attribute(ID::allconst, false);
+    
+    bool attr_allseq = ast_stack.back()->children.back()->get_bool_attribute(ID::allseq);
+    ast_stack.back()->children.back()->set_bool_attribute(ID::allseq, false);
+    
 		if (current_wire_rand || attr_anyconst || attr_anyseq || attr_allconst || attr_allseq) {
 			AstNode *wire = new AstNode(AST_IDENTIFIER);
 			AstNode *fcall = new AstNode(AST_FCALL);
@@ -1971,7 +1959,7 @@ cell_port:
 	attr TOK_WILDCARD_CONNECT {
 		if (!sv_mode)
 			frontend_verilog_yyerror("Wildcard port connections are only supported in SystemVerilog mode.");
-		astbuf2->attributes[ID::wildcard_port_conns] = AstNode::mkconst_int(1, false);
+		astbuf2->set_bool_attribute(ID::wildcard_port_conns);
 	};
 
 always_comb_or_latch:
@@ -1995,7 +1983,7 @@ always_stmt:
 		AstNode *node = new AstNode(AST_ALWAYS);
 		append_attr(node, $1);
 		if ($2)
-			node->attributes[ID::always_ff] = AstNode::mkconst_int(1, false);
+			node->set_bool_attribute(ID::always_ff);
 		ast_stack.back()->children.push_back(node);
 		ast_stack.push_back(node);
 	} always_cond {
@@ -2015,9 +2003,9 @@ always_stmt:
 		AstNode *node = new AstNode(AST_ALWAYS);
 		append_attr(node, $1);
 		if ($2)
-			node->attributes[ID::always_latch] = AstNode::mkconst_int(1, false);
+			node->set_bool_attribute(ID::always_latch);
 		else
-			node->attributes[ID::always_comb] = AstNode::mkconst_int(1, false);
+			node->set_bool_attribute(ID::always_comb);
 		ast_stack.back()->children.push_back(node);
 		ast_stack.push_back(node);
 		AstNode *block = new AstNode(AST_BLOCK);
@@ -2518,7 +2506,7 @@ unique_case_attr:
 
 case_attr:
 	attr unique_case_attr {
-		if ($2) (*$1)[ID::parallel_case] = AstNode::mkconst_int(1, false);
+		if ($2) (*$1)[ID::attribute_string(ID::parallel_case)] = AstNode::mkconst_int(1, false);
 		$$ = $1;
 	};
 
@@ -2535,12 +2523,10 @@ case_type:
 
 opt_synopsys_attr:
 	opt_synopsys_attr TOK_SYNOPSYS_FULL_CASE {
-		if (ast_stack.back()->attributes.count(ID::full_case) == 0)
-			ast_stack.back()->attributes[ID::full_case] = AstNode::mkconst_int(1, false);
+		ast_stack.back()->set_bool_attribute(ID::full_case);
 	} |
 	opt_synopsys_attr TOK_SYNOPSYS_PARALLEL_CASE {
-		if (ast_stack.back()->attributes.count(ID::parallel_case) == 0)
-			ast_stack.back()->attributes[ID::parallel_case] = AstNode::mkconst_int(1, false);
+		ast_stack.back()->set_bool_attribute(ID::parallel_case);
 	} |
 	%empty;
 

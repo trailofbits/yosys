@@ -60,11 +60,27 @@ void create_ice40_wrapcarry(ice40_wrapcarry_pm &pm)
 
 	for (const auto &a : st.carry->attributes)
 		cell->attributes[stringf("\\SB_CARRY.%s", a.first.c_str())] = a.second;
+
+	for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+    if (st.carry->bool_attributes.test(i)) {
+      const auto attr_name = ID::attribute_name(static_cast<ID::BoolId>(i));
+      cell->attributes[stringf("\\SB_CARRY.%s", attr_name)] = Const(1);
+    }
+  }
+
 	for (const auto &a : st.lut->attributes)
 		cell->attributes[stringf("\\SB_LUT4.%s", a.first.c_str())] = a.second;
+
+	for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+    if (st.lut->bool_attributes.test(i)) {
+      const auto attr_name = ID::attribute_name(static_cast<ID::BoolId>(i));
+      cell->attributes[stringf("\\SB_LUT4.%s", attr_name)] = Const(1);
+    }
+  }
+
 	cell->attributes[ID(SB_LUT4.name)] = Const(st.lut->name.str());
 	if (st.carry->get_bool_attribute(ID::keep) || st.lut->get_bool_attribute(ID::keep))
-		cell->attributes[ID::keep] = true;
+		cell->set_bool_attribute(ID::keep);
 
 	pm.autoremove(st.carry);
 	pm.autoremove(st.lut);

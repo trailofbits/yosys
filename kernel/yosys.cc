@@ -533,8 +533,10 @@ void yosys_setup()
 	init_abc_executable_name();
 
 #define X(_id) RTLIL::ID::_id = "\\" # _id;
+#define BOOL_X(_id)
 #include "kernel/constids.inc"
 #undef X
+#undef BOOL_X
 
 	#ifdef WITH_PYTHON
 		PyImport_AppendInittab((char*)"libyosys", INIT_MODULE);

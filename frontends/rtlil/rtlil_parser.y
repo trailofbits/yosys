@@ -37,6 +37,7 @@ namespace RTLIL_FRONTEND {
 	std::vector<std::vector<RTLIL::SwitchRule*>*> switch_stack;
 	std::vector<RTLIL::CaseRule*> case_stack;
 	dict<RTLIL::IdString, RTLIL::Const> attrbuf;
+	std::bitset<RTLIL::ID::kMaxNumBoolIds> boolattrbuf;
 	bool flag_nooverwrite, flag_overwrite, flag_lib;
 	bool delete_current_module;
 }
@@ -107,7 +108,7 @@ module:
 		delete_current_module = false;
 		if (current_design->has($2)) {
 			RTLIL::Module *existing_mod = current_design->module($2);
-			if (!flag_overwrite && (flag_lib || (attrbuf.count(ID::blackbox) && attrbuf.at(ID::blackbox).as_bool()))) {
+			if (!flag_overwrite && (flag_lib || boolattrbuf.test(ID::blackbox))) {
 				log("Ignoring blackbox re-definition of module %s.\n", $2);
 				delete_current_module = true;
 			} else if (!flag_nooverwrite && !flag_overwrite && !existing_mod->get_bool_attribute(ID::blackbox)) {

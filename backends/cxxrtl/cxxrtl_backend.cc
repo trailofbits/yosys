@@ -749,6 +749,11 @@ struct CxxrtlWorker {
 			}
 			f << "\n";
 		}
+		for (auto i = 0u; i < ID::kMaxNumBoolIds; ++i) {
+		  if (object->bool_attributes.test(i)) {
+		    f << indent << "// " << attribute_name(static_cast<ID::BoolId>(i)) << ": 1\n";
+		  }
+		}
 	}
 
 	void dump_const_init(const RTLIL::Const &data, int width, int offset = 0, bool fixed_width = false)
