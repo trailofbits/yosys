@@ -250,7 +250,7 @@ void SubCircuit::Graph::markExtern(std::string nodeId, std::string portId, int b
 	Port &port = node.ports[node.portMap[portId]];
 
 	if (bit < 0) {
-		for (const auto portBit : port.bits)
+		for (auto portBit : port.bits)
 			edges[portBit.edgeIdx].isExtern = true;
 	} else {
 		assert(bit < int(port.bits.size()));

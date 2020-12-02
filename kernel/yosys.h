@@ -162,8 +162,6 @@ extern Tcl_Obj *Tcl_ObjSetVar2(Tcl_Interp *interp, Tcl_Obj *part1Ptr, Tcl_Obj *p
 #  define YS_FALLTHROUGH
 #endif
 
-YOSYS_NAMESPACE_BEGIN
-
 // Note: All headers included in hashlib.h must be included
 // outside of YOSYS_NAMESPACE before this or bad things will happen.
 #ifdef HASHLIB_H
@@ -173,6 +171,8 @@ YOSYS_NAMESPACE_BEGIN
 #  include "kernel/hashlib.h"
 #  undef HASHLIB_H
 #endif
+
+YOSYS_NAMESPACE_BEGIN
 
 using std::vector;
 using std::string;

@@ -220,7 +220,7 @@ RTLIL::Const::Const(RTLIL::State bit, int width)
 RTLIL::Const::Const(const std::vector<bool> &bits)
 {
 	flags = RTLIL::CONST_FLAG_NONE;
-	for (const auto &b : bits)
+	for (const auto b : bits)
 		this->bits.emplace_back(b ? State::S1 : State::S0);
 }
 
