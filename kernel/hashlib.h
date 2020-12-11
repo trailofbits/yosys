@@ -12,23 +12,29 @@
 #ifndef HASHLIB_H
 #define HASHLIB_H
 
+#include <algorithm>
 #include <stdexcept>
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <cstddef>
 
+YOSYS_NAMESPACE_BEGIN
 namespace hashlib {
 
-const int hashtable_size_trigger = 2;
-const int hashtable_size_factor = 3;
+enum : int {
+  hashtable_size_factor = 3,
+
+  hashtable_max_probe_before_resize = 8,
+
+  // traditionally 5381 is used as starting value for the djb2 hash
+  mkhash_init = 5381
+};
 
 // The XOR version of DJB2
 inline unsigned int mkhash(unsigned int a, unsigned int b) {
 	return ((a << 5) + a) ^ b;
 }
-
-// traditionally 5381 is used as starting value for the djb2 hash
-const unsigned int mkhash_init = 5381;
 
 // The ADD version of DJB2
 // (use this version for cache locality in b)
@@ -166,31 +172,6 @@ inline unsigned int mkhash(const T &v) {
 	return hash_ops<T>().hash(v);
 }
 
-inline int hashtable_size(int min_size)
-{
-	static std::vector<int> zero_and_some_primes = {
-		0, 23, 29, 37, 47, 59, 79, 101, 127, 163, 211, 269, 337, 431, 541, 677,
-		853, 1069, 1361, 1709, 2137, 2677, 3347, 4201, 5261, 6577, 8231, 10289,
-		12889, 16127, 20161, 25219, 31531, 39419, 49277, 61603, 77017, 96281,
-		120371, 150473, 188107, 235159, 293957, 367453, 459317, 574157, 717697,
-		897133, 1121423, 1401791, 1752239, 2190299, 2737937, 3422429, 4278037,
-		5347553, 6684443, 8355563, 10444457, 13055587, 16319519, 20399411,
-		25499291, 31874149, 39842687, 49803361, 62254207, 77817767, 97272239,
-		121590311, 151987889, 189984863, 237481091, 296851369, 371064217
-	};
-
-	for (auto p : zero_and_some_primes)
-		if (p >= min_size) return p;
-
-	if (sizeof(int) == 4)
-		throw std::length_error("hash table exceeded maximum size. use a ILP64 abi for larger tables.");
-
-	for (auto p : zero_and_some_primes)
-		if (100129 * p > min_size) return 100129 * p;
-
-	throw std::length_error("hash table exceeded maximum size.");
-}
-
 template<typename K, typename T, typename OPS = hash_ops<K>> class dict;
 template<typename K, int offset = 0, typename OPS = hash_ops<K>> class idict;
 template<typename K, typename OPS = hash_ops<K>> class pool;
@@ -230,17 +211,34 @@ class dict
 		return hash;
 	}
 
-	void do_rehash()
-	{
-		hashtable.clear();
-		hashtable.resize(hashtable_size(entries.capacity() * hashtable_size_factor), -1);
+	void do_rehash_slow(size_t ideal_size) {
+	  hashtable.clear();
+    hashtable.resize(ideal_size, -1);
 
-		for (int i = 0; i < int(entries.size()); i++) {
-			do_assert(-1 <= entries[i].next && entries[i].next < int(entries.size()));
-			int hash = do_hash(entries[i].udata.first);
-			entries[i].next = hashtable[hash];
-			hashtable[hash] = i;
-		}
+    if (static_cast<size_t>(static_cast<int>(ideal_size)) != ideal_size) {
+      throw std::length_error("hash table exceeded maximum size.");
+    }
+
+    int i = 0;
+    const auto num_entries = static_cast<int>(entries.size());
+    for (auto &entry : entries) {
+      do_assert(-1 <= entry.next && entry.next < num_entries);
+      const int hash = do_hash(entry.udata.first);
+      entry.next = hashtable[hash];
+      hashtable[hash] = i++;
+    }
+	}
+
+	bool do_rehash(void) const
+	{
+	  const auto ideal_size = std::max<size_t>(entries.capacity(), 1) *
+                            hashtable_size_factor;
+	  if (hashtable.size() == ideal_size) {
+	    return false;
+	  }
+
+	  const_cast<dict<K, T, OPS> *>(this)->do_rehash_slow(ideal_size);
+	  return true;
 	}
 
 	int do_erase(int index, int hash)
@@ -297,16 +295,18 @@ class dict
 		if (hashtable.empty())
 			return -1;
 
-		if (entries.size() * hashtable_size_trigger > hashtable.size()) {
-			((dict*)this)->do_rehash();
-			hash = do_hash(key);
-		}
-
 		int index = hashtable[hash];
 
+		auto num_probes = 0;
 		while (index >= 0 && !ops.cmp(entries[index].udata.first, key)) {
 			index = entries[index].next;
 			do_assert(-1 <= index && index < int(entries.size()));
+			++num_probes;
+		}
+
+		if (num_probes >= hashtable_max_probe_before_resize &&
+		    do_rehash()) {
+      hash = do_hash(key);
 		}
 
 		return index;
@@ -397,30 +397,32 @@ public:
 	}
 
 	dict(const dict &other)
-	{
-		entries = other.entries;
-		do_rehash();
+	    : hashtable(other.hashtable) {
+    entries.reserve(other.entries.capacity());
+    entries.insert(entries.begin(), other.entries.begin(), other.entries.end());
 	}
 
-	dict(dict &&other)
-	{
-		swap(other);
-	}
+	dict(dict &&other) noexcept
+	    : hashtable(std::move(other.hashtable)),
+	      entries(std::move(other.entries)) {}
 
 	dict &operator=(const dict &other) {
-		entries = other.entries;
-		do_rehash();
+    entries.clear();
+	  entries.reserve(other.entries.capacity());
+    entries.insert(entries.begin(), other.entries.begin(), other.entries.end());
+    hashtable = other.hashtable;
 		return *this;
 	}
 
-	dict &operator=(dict &&other) {
-		clear();
-		swap(other);
+	dict &operator=(dict &&other) noexcept {
+	  entries = std::move(other.entries);
+	  hashtable = std::move(other.hashtable);
 		return *this;
 	}
 
 	dict(const std::initializer_list<std::pair<K, T>> &list)
 	{
+	  entries.reserve(list.size());
 		for (auto &it : list)
 			insert(it);
 	}
@@ -594,6 +596,8 @@ public:
 	void sort(Compare comp = Compare())
 	{
 		std::sort(entries.begin(), entries.end(), [comp](const entry_t &a, const entry_t &b){ return comp(b.udata.first, a.udata.first); });
+		std::vector<int> new_hashtable;
+		hashtable.swap(new_hashtable);
 		do_rehash();
 	}
 
@@ -677,18 +681,35 @@ protected:
 		return hash;
 	}
 
-	void do_rehash()
-	{
-		hashtable.clear();
-		hashtable.resize(hashtable_size(entries.capacity() * hashtable_size_factor), -1);
+	void do_rehash_slow(size_t ideal_size) {
+    hashtable.clear();
+    hashtable.resize(ideal_size, -1);
 
-		for (int i = 0; i < int(entries.size()); i++) {
-			do_assert(-1 <= entries[i].next && entries[i].next < int(entries.size()));
-			int hash = do_hash(entries[i].udata);
-			entries[i].next = hashtable[hash];
-			hashtable[hash] = i;
-		}
-	}
+    if (static_cast<size_t>(static_cast<int>(ideal_size)) != ideal_size) {
+      throw std::length_error("hash table exceeded maximum size.");
+    }
+
+    int i = 0;
+    const auto num_entries = static_cast<int>(entries.size());
+    for (auto &entry : entries) {
+      do_assert(-1 <= entry.next && entry.next < num_entries);
+      const int hash = do_hash(entry.udata);
+      entry.next = hashtable[hash];
+      hashtable[hash] = i++;
+    }
+  }
+
+  bool do_rehash(void) const
+  {
+    const auto ideal_size = std::max<size_t>(entries.capacity(), 1) *
+                            hashtable_size_factor;
+    if (hashtable.size() == ideal_size) {
+      return false;
+    }
+
+    const_cast<pool<K, OPS> *>(this)->do_rehash_slow(ideal_size);
+    return true;
+  }
 
 	int do_erase(int index, int hash)
 	{
@@ -740,17 +761,18 @@ protected:
 		if (hashtable.empty())
 			return -1;
 
-		if (entries.size() * hashtable_size_trigger > hashtable.size()) {
-			((pool*)this)->do_rehash();
-			hash = do_hash(key);
-		}
-
 		int index = hashtable[hash];
-
+		auto num_probes = 0;
 		while (index >= 0 && !ops.cmp(entries[index].udata, key)) {
 			index = entries[index].next;
 			do_assert(-1 <= index && index < int(entries.size()));
+			++num_probes;
 		}
+
+    if (num_probes >= hashtable_max_probe_before_resize &&
+        do_rehash()) {
+      hash = do_hash(key);
+    }
 
 		return index;
 	}
@@ -823,29 +845,32 @@ public:
 
 	pool(const pool &other)
 	{
-		entries = other.entries;
-		do_rehash();
+    entries.reserve(other.entries.capacity());
+    entries.insert(entries.begin(), other.entries.begin(), other.entries.end());
+    hashtable = other.hashtable;
 	}
 
-	pool(pool &&other)
-	{
-		swap(other);
-	}
+	pool(pool &&other) noexcept
+	    : hashtable(std::move(other.hashtable)),
+	      entries(std::move(other.entries)) {}
 
 	pool &operator=(const pool &other) {
-		entries = other.entries;
-		do_rehash();
+	  entries.clear();
+	  entries.reserve(other.entries.capacity());
+    entries.insert(entries.begin(), other.entries.begin(), other.entries.end());
+    hashtable = other.hashtable;
 		return *this;
 	}
 
-	pool &operator=(pool &&other) {
-		clear();
-		swap(other);
+	pool &operator=(pool &&other) noexcept {
+		entries = std::move(other.entries);
+		hashtable = std::move(other.hashtable);
 		return *this;
 	}
 
 	pool(const std::initializer_list<K> &list)
 	{
+	  entries.reserve(list.size());
 		for (auto &it : list)
 			insert(it);
 	}
@@ -946,6 +971,8 @@ public:
 	void sort(Compare comp = Compare())
 	{
 		std::sort(entries.begin(), entries.end(), [comp](const entry_t &a, const entry_t &b){ return comp(b.udata, a.udata); });
+		std::vector<int> new_hashtable;
+    hashtable.swap(new_hashtable);
 		do_rehash();
 	}
 
@@ -1181,5 +1208,6 @@ public:
 };
 
 } /* namespace hashlib */
+YOSYS_NAMESPACE_END
 
 #endif
