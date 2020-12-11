@@ -25,6 +25,8 @@ namespace hashlib {
 enum : int {
   hashtable_size_factor = 3,
 
+  hashtable_max_probe_before_resize = 8,
+
   // traditionally 5381 is used as starting value for the djb2 hash
   mkhash_init = 5381
 };
@@ -293,15 +295,18 @@ class dict
 		if (hashtable.empty())
 			return -1;
 
-		if (do_rehash()) {
-		  hash = do_hash(key);
-		}
-
 		int index = hashtable[hash];
 
+		auto num_probes = 0;
 		while (index >= 0 && !ops.cmp(entries[index].udata.first, key)) {
 			index = entries[index].next;
 			do_assert(-1 <= index && index < int(entries.size()));
+			++num_probes;
+		}
+
+		if (num_probes >= hashtable_max_probe_before_resize &&
+		    do_rehash()) {
+      hash = do_hash(key);
 		}
 
 		return index;
@@ -756,16 +761,18 @@ protected:
 		if (hashtable.empty())
 			return -1;
 
-		if (do_rehash()) {
-      hash = do_hash(key);
-    }
-
 		int index = hashtable[hash];
-
+		auto num_probes = 0;
 		while (index >= 0 && !ops.cmp(entries[index].udata, key)) {
 			index = entries[index].next;
 			do_assert(-1 <= index && index < int(entries.size()));
+			++num_probes;
 		}
+
+    if (num_probes >= hashtable_max_probe_before_resize &&
+        do_rehash()) {
+      hash = do_hash(key);
+    }
 
 		return index;
 	}
